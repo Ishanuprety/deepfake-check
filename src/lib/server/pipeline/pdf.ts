@@ -1,6 +1,31 @@
-import { createCanvas } from "@napi-rs/canvas";
 import sharp from "sharp";
 import type { CandidateImage } from "@/lib/server/pipeline/types";
+
+interface CanvasModule {
+  createCanvas: (width: number, height: number) => {
+    getContext: (contextId: "2d") => unknown;
+    toBuffer: (mimeType?: string) => Buffer;
+  };
+}
+
+interface InlineImageArg {
+  width: number;
+  height: number;
+  data: Uint8Array | Uint8ClampedArray;
+}
+
+interface OperatorListLike {
+  fnArray: number[];
+  argsArray: unknown[][];
+}
+
+interface PdfPageLike {
+  getOperatorList: () => Promise<OperatorListLike>;
+  getViewport: (params: { scale: number }) => { width: number; height: number };
+  render: (params: { canvasContext: unknown; viewport: { width: number; height: number } }) => {
+    promise: Promise<void>;
+  };
+}
 
 async function loadPdfJs() {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -27,7 +52,7 @@ function toRgbBuffer(
   return Buffer.alloc(0);
 }
 
-async function extractInlineImages(page: any, fileName: string): Promise<CandidateImage[]> {
+async function extractInlineImages(page: PdfPageLike, fileName: string): Promise<CandidateImage[]> {
   const pdfjs = await loadPdfJs();
   const opList = await page.getOperatorList();
   const images: CandidateImage[] = [];
@@ -35,7 +60,7 @@ async function extractInlineImages(page: any, fileName: string): Promise<Candida
 
   for (let i = 0; i < opList.fnArray.length; i += 1) {
     if (opList.fnArray[i] !== pdfjs.OPS.paintInlineImageXObject) continue;
-    const arg = opList.argsArray[i]?.[0];
+    const arg = opList.argsArray[i]?.[0] as InlineImageArg | undefined;
     if (!arg || !arg.width || !arg.height || !arg.data) continue;
 
     const raw = toRgbBuffer(arg.data, arg.width, arg.height);
@@ -64,6 +89,7 @@ export async function extractPdfCandidates(
   fileName: string,
   fileBuffer: Buffer
 ): Promise<CandidateImage[]> {
+  const { createCanvas } = (await import("@napi-rs/canvas")) as CanvasModule;
   const pdfjs = await loadPdfJs();
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(fileBuffer),
@@ -75,11 +101,11 @@ export async function extractPdfCandidates(
   const output: CandidateImage[] = [];
 
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-    const page = await doc.getPage(pageNumber);
+    const page = (await doc.getPage(pageNumber)) as unknown as PdfPageLike;
     const viewport = page.getViewport({ scale: 1.3 });
     const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
     const context = canvas.getContext("2d");
-    await page.render({ canvasContext: context as any, viewport }).promise;
+    await page.render({ canvasContext: context, viewport }).promise;
     const pageBuffer = canvas.toBuffer("image/png");
 
     output.push({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { SubmissionRecord } from "@/types/report";
 
@@ -56,17 +56,6 @@ export function ResultsView({ submissionId }: { submissionId: string }) {
   }, [submissionId]);
 
   const summary = record?.report?.summary;
-  const allItems = useMemo(
-    () =>
-      record?.report?.files.flatMap((file) =>
-        file.results.map((result) => ({
-          file: file.file_name,
-          ...result
-        }))
-      ) ?? [],
-    [record]
-  );
-
   if (error) {
     return <p className="text-rose-300">{error}</p>;
   }
